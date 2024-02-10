@@ -1,0 +1,13 @@
+((version "0.1.0")
+ (synopsis "Scheme interpreter")
+ (dependencies r7rs)
+ (component-options (csc-options -X r7rs -R r7rs))
+ (components (program main
+                (component-dependencies schasm.expression
+                                        schasm.expand)
+                (source "../src/schasm.scm"))
+             (extension schasm.expression
+                (source "../src/expression.sld"))
+             (extension schasm.expand
+                (component-dependencies schasm.expression)
+                (source "../src/expand.sld"))))

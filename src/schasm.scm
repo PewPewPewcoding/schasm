@@ -222,7 +222,7 @@
          (let ((captured-context (continuation-context function)))
            (unless (= 1 (length arguments))
              (error "invoke: arity error" arity arguments))
-           (context-resume captured-context metacontext arguments)))
+           (context-resume captured-context metacontext (car arguments))))
 
         ((closure? function)
          (let* ((environment (closure-environment function))

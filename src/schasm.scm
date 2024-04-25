@@ -1,17 +1,17 @@
 (import (scheme base)
-        (scheme cxr)
         (scheme write)
-        (scheme read)
         (srfi 1)
         (schasm expression)
         (schasm expand))
 
 ;;; environment
 
-(define empty-environment '())
+(define (empty-environment variable)
+  (error "environment: variable not found" variable))
 
 (define (environment-add environment variable value)
-  (cons (cons variable value) environment))
+  (lambda (variable*)
+    (if (equal? variable* variable) value (environment variable*))))
 
 (define (environment-add* environment variables values)
   (fold (lambda (variable value environment)
@@ -20,246 +20,93 @@
         variables
         values))
 
-(define (environment-get environment variable)
-  (let ((entry (assoc variable environment)))
-    (unless entry
-      (error "environment-get: variable not found in environment"
-             variable
-             environment))
-    (cdr entry)))
+;;; store
 
-;;; metacontext
+(define start-address 0)
 
-(define empty-metacontext '())
+(define (start-search address)
+  (error "store: unallocated memory" address))
 
-(define (metacontext-add metacontext context)
-  (cons context metacontext))
+(define (search-add search address value)
+  (lambda (address*)
+    (if (equal? address* address) value (search address*))))
 
-(define (metacontext-resume metacontext value)
-  (if (null? metacontext)
-      value
-      (let ((context     (car metacontext))
-            (metacontext (cdr metacontext)))
-        (context-resume context metacontext value))))
+(define (make-store address search)
+  (lambda (continuation)
+    (continuation address search)))
+
+(define empty-store (make-store start-address start-search))
+
+(define (store-get store address)
+  (store (lambda (_ search) (search address))))
+
+(define (store-update store address value)
+  #f)
+
+(define (store-allocate store value continuation)
+  (store (lambda (address search)
+           (continuation (make-store (+ 1 address)
+                                     (search-add search address value))
+                         address))))
+
+(define (store-allocate* store values continuation)
+  (if (null? values)
+      (continuation store '())
+      (let ((value  (list-ref  values 0))
+            (values (list-tail values 1)))
+        (store-allocate
+         store value
+         (lambda (store* value*)
+           (store-allocate*
+            store* values
+            (lambda (store** values*)
+              (continuation store** (cons value* values*)))))))))
 
 ;;; context
 
-(define empty-context '())
+(define (empty-context metacontext store value)
+  (metacontext store value))
 
-(define (context-add context frame)
-  (cons frame context))
+;;; metacontext
 
-(define (context-resume context metacontext value)
-  (if (null? context)
-      (metacontext-resume metacontext value)
-      (let ((frame   (car context))
-            (context (cdr context)))
-        (cond ((begin-frame? frame)
-               (begin-frame-resume frame context metacontext value))
-
-              ((if-frame? frame)
-               (if-frame-resume frame context metacontext value))
-
-              ((let-frame? frame)
-               (let-frame-resume frame context metacontext value))
-
-              ((call-frame? frame)
-               (call-frame-resume frame context metacontext value))))))
-
-;;; frame
-
-(define-record-type <begin-frame>
-  (make-begin-frame environment expressions)
-  begin-frame?
-  (environment begin-frame-environment)
-  (expressions begin-frame-expressions))
-
-(define (begin-frame-resume frame context metacontext value)
-  (let ((environment (begin-frame-environment frame))
-        (expressions (begin-frame-expressions frame)))
-    (if (null? expressions)
-        (context-resume context
-                        metacontext
-                        value)
-        (let ((expression  (car expressions))
-              (expressions (cdr expressions)))
-          (evaluate expression
-                    environment
-                    (context-add context
-                                 (make-begin-frame environment
-                                                   expressions))
-                    metacontext)))))
-
-(define-record-type <if-frame>
-  (make-if-frame environment consequent alternative)
-  if-frame?
-  (environment if-frame-environment)
-  (consequent  if-frame-consequent)
-  (alternative if-frame-alternative))
-
-(define (if-frame-resume frame context metacontext value)
-  (let ((environment (if-frame-environment frame))
-        (consequent  (if-frame-consequent  frame))
-        (alternative (if-frame-alternative frame)))
-    (if value
-        (evaluate consequent
-                  environment
-                  context
-                  metacontext)
-        (evaluate alternative
-                  environment
-                  context
-                  metacontext))))
-
-(define-record-type <let-frame>
-  (make-let-frame environment variables expression done todo)
-  let-frame?
-  (environment let-frame-environment)
-  (variables   let-frame-variables)
-  (expression  let-frame-expression)
-  (done        let-frame-done)
-  (todo        let-frame-todo))
-
-(define (let-frame-resume frame context metacontext value)
-  (let* ((environment (let-frame-environment frame))
-         (variables   (let-frame-variables   frame))
-         (expression  (let-frame-expression  frame))
-         (todo        (let-frame-todo        frame))
-         (done        (let-frame-done        frame))
-         (done (cons value done)))
-    (if (null? todo)
-        (evaluate expression
-                  (environment-add* environment variables (reverse done))
-                  context
-                  metacontext)
-        (let ((next (car todo))
-              (todo (cdr todo)))
-          (evaluate next
-                    environment
-                    (context-add context
-                                 (make-let-frame environment
-                                                 variables
-                                                 expression
-                                                 done
-                                                 todo))
-                    metacontext)))))
-
-(define-record-type <call-frame>
-  (make-call-frame environment done todo)
-  call-frame?
-  (environment call-frame-environment)
-  (done        call-frame-done)
-  (todo        call-frame-todo))
-
-(define (call-frame-resume frame context metacontext value)
-  (let* ((environment (call-frame-environment frame))
-         (todo        (call-frame-todo        frame))
-         (done        (call-frame-done        frame))
-         (done (cons value done)))
-    (if (null? todo)
-        (let* ((done (reverse done))
-               (function  (car done))
-               (arguments (cdr done)))
-          (invoke function arguments context metacontext))
-        (let ((next (car todo))
-              (todo (cdr todo)))
-          (evaluate next
-                    environment
-                    (context-add context
-                                 (make-call-frame environment
-                                                  done
-                                                  todo))
-                    metacontext)))))
-
-;;; values
-
-(define-record-type <primitive>
-  (make-primitive operation arity meta)
-  primitive?
-  (operation primitive-operation)
-  (arity     primitive-arity)
-  (meta      primitive-meta))
-
-(define-record-type <foreign>
-  (make-foreign operation arity meta)
-  foreign?
-  (operation foreign-operation)
-  (arity     foreign-arity)
-  (meta      foreign-meta))
-
-(define-record-type <continuation>
-  (make-continuation context meta)
-  continuation?
-  (context continuation-context)
-  (meta    continuation-meta))
-
-(define-record-type <closure>
-  (make-closure environment variables expression meta)
-  closure?
-  (environment closure-environment)
-  (variables   closure-variables)
-  (expression  closure-expression)
-  (meta        closure-meta))
+(define (empty-metacontext store value)
+  value)
 
 ;;; interpreter
 
-(define (invoke function arguments context metacontext)
-  (cond ((primitive? function)
-         (let ((operation (primitive-operation function))
-               (arity     (primitive-arity     function)))
-           (unless (= arity (length arguments))
-             (error "invoke: arity error" arity arguments))
-           (operation context metacontext arguments)))
-
-        ((foreign? function)
-         (let ((operation (foreign-operation function))
-               (arity     (foreign-arity     function)))
-           (unless (= arity (length arguments))
-             (error "invoke: arity error" arity arguments))
-           (context-resume context metacontext (operation arguments))))
-
-        ((continuation? function)
-         (let ((captured-context (continuation-context function)))
-           (unless (= 1 (length arguments))
-             (error "invoke: arity error" arity arguments))
-           (context-resume captured-context metacontext (car arguments))))
-
-        ((closure? function)
-         (let* ((environment (closure-environment function))
-                (variables   (closure-variables   function))
-                (expression  (closure-expression  function))
-                (environment (environment-add* environment variables arguments)))
-           (unless (= (length variables) (length arguments))
-             (error "invoke: arity error" variables arguments))
-           (evaluate expression environment context metacontext)))))
-
-(define (evaluate expression environment context metacontext)
+(define (evaluate expression environment store context metacontext)
   (cond ((literal? expression)
-         (context-resume context metacontext expression))
+         (context metacontext store
+                  expression))
 
         ((variable? expression)
-         (context-resume context
-                         metacontext
-                         (environment-get environment expression)))
+         (context metacontext store
+                  (store-get store (environment expression))))
 
         ((lambda? expression)
-         (context-resume context
-                         metacontext
-                         (make-closure environment
-                                       (lambda-variables  expression)
-                                       (lambda-expression expression)
-                                       expression)))
+         (let ((variables  (lambda-variables expression))
+               (expression (lambda-expression expression)))
+           (context metacontext store
+                    (lambda (metacontext* context* store* arguments)
+                      (store-allocate*
+                       store arguments
+                       (lambda (store** addresses)
+                         (evaluate expression
+                                   (environment-add* environment
+                                                     variables
+                                                     addresses)
+                                   store**
+                                   context*
+                                   metacontext*)))))))
 
         ((begin? expression)
-         (let* ((expressions (begin-expressions expression))
-                (expression  (car expressions))
-                (expressions (cdr expressions)))
-           (evaluate expression
-                     environment
-                     (context-add context
-                                  (make-begin-frame environment
-                                                    expressions))
-                     metacontext)))
+         (let* ((expressions (begin-expressions expression)))
+           (evaluate* expressions
+                      environment
+                      store
+                      (lambda (metacontext* store* values)
+                        (context metacontext* store* (last values)))
+                      metacontext)))
 
         ((if? expression)
          (let ((condition   (if-condition expression))
@@ -267,54 +114,99 @@
                (alternative (if-alternative expression)))
            (evaluate condition
                      environment
-                     (context-add context
-                                  (make-if-frame environment
-                                                 consequent
-                                                 alternative))
-                     metacontext)))
+                     store
+                     (lambda (metacontext* store* value)
+                       (if value
+                           (evaluate consequent
+                                     environment
+                                     store*
+                                     context
+                                     metacontext*)
+                           (evaluate consequent
+                                     environment
+                                     store*
+                                     context
+                                     metacontext*))))))
 
         ((let? expression)
          (let* ((variables       (let-variables       expression))
                 (initializations (let-initializations expression))
-                (initialization  (car initializations))
-                (initializations (cdr initializations))
                 (expression      (let-expression      expression)))
-           (evaluate initialization
-                     environment
-                     (context-add context
-                                  (make-let-frame environment
-                                                  variables
-                                                  expression
-                                                  '()
-                                                  initializations))
-                     metacontext)))
+           (evaluate* initializations
+                      environment
+                      store
+                      (lambda (metacontext* store* values)
+                        (store-allocate*
+                         store* values
+                         (lambda (store** addresses)
+                           (evaluate expression
+                                     (environment-add* environment
+                                                          variables
+                                                          addresses)
+                                     store**
+                                     context
+                                     metacontext*))))
+                      metacontext)))
 
         ((reset? expression)
-         (let* ((expression  (reset-expression expression))
-                (metacontext (metacontext-add metacontext context)))
-            (evaluate expression environment empty-context metacontext)))
+         (evaluate (reset-expression expression)
+                   environment
+                   empty-context
+                   (lambda (store* value) (context metacontext store* value))))
 
         ((shift? expression)
-         (let* ((variable    (shift-variable expression))
-                (expression*  (shift-expression expression))
-                (environment (environment-add environment
-                                              variable
-                                              (make-continuation context expression))))
-            (evaluate expression* environment empty-context metacontext)))
+         (evaluate (shift-expression expression)
+                   (environment-add environment
+                                    (shift-variable variable)
+                                    (lambda (metacontext* context* store* arguments)
+                                      (context (lambda (store** value)
+                                                 (context metacontext* store** value))
+                                               store*
+                                               (list-ref arguments 0))))
+                   empty-context
+                   metacontext))
+
+        ((set!? expression)
+         (let* ((variable   (set!-variable   expression))
+                (expression (set!-expression expression))
+                (address (environment variable)))
+           (evaluate (set!-expression expression)
+                     environment
+                     (lambda (metacontext* store* value)
+                       (context metacontext*
+                                (store-update store* address value)
+                                value))
+                     metacontext)))
 
         ((call? expression)
-         (let ((function  (call-function expression))
-               (arguments (call-function expression)))
-            (evaluate function
-                      environment
-                      (context-add context
-                                   (make-call-frame environment
-                                                    '()
-                                                    (call-arguments expression)))
-                      metacontext)))
+         (evaluate* expression
+                    environment
+                    store
+                    (lambda (metacontext* store* values)
+                      (let ((function  (list-ref values 0))
+                            (arguments (list-tail values 1)))
+                        (function metacontext* context store* arguments)))
+                    metacontext))
 
         (else
          (error "evaluate: invalid expression" expression))))
+
+(define (evaluate* expressions environment store context metacontext)
+  (if (null? expressions)
+      (context metacontext store '())
+      (let ((expression  (list-ref  expressions 0))
+            (expressions (list-tail expressions 1)))
+        (evaluate expression
+                  environment
+                  store
+                  (lambda (metacontext* store* value)
+                    (evaluate* expressions
+                               environment
+                               store
+                               (lambda (metacontext** store** values)
+                                 (context metacontext** store** (cons value values)))
+                               metacontext*))
+                  metacontext))))
 
 ;;; testing
 
@@ -330,8 +222,9 @@
          (b ((lambda (x) x) 42)))
      a))
 
-(define result (evaluate (expand program2)
+(define result (evaluate program2
                          empty-environment
+                         empty-store
                          empty-context
                          empty-metacontext))
 

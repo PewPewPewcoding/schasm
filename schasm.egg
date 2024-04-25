@@ -6,8 +6,8 @@
                 (component-dependencies schasm.expression
                                         schasm.expand)
                 (source "../src/schasm.scm"))
-             (extension schasm.expression
-                (source "../src/expression.sld"))
              (extension schasm.expand
                 (component-dependencies schasm.expression)
-                (source "../src/expand.sld"))))
+                (source "../src/expand.sld"))
+             (extension schasm.expression
+                (source "../src/expression.sld"))))

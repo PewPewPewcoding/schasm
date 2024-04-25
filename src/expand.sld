@@ -48,6 +48,16 @@
                              initializations)
                     ,(transform fn expression))))
 
+              ((letrec? expression)
+               (let ((variables       (letrec-variables       expression))
+                     (initializations (letrec-initializations expression))
+                     (expression      (letrec-expression      expression)))
+                 `(letrec ,(map (lambda (v e)
+                                  `(,v ,(transform fn e)))
+                                variables
+                                initializations)
+                    ,(transform fn expression))))
+
               ((reset? expression)
                (let ((expression (reset-expression expression)))
                  `(reset ,(transform fn expression))))
@@ -77,6 +87,10 @@
         (and (let? expression)
              (member x (let-variables expression))))
 
+      (define (letrec-capture? x expression)
+        (and (letrec? expression)
+             (member x (letrec-variables expression))))
+
       (define (shift-capture? x expression)
         (and (shift? expression)
              (equal? x (shift-variable expression))))
@@ -87,9 +101,11 @@
                 y)
                ((lambda-capture? x expression)
                 expression)
-               ((let-capture? x expression)
+               ((let-capture?    x expression)
                 expression)
-               ((shift-capture? x expression)
+               ((letrec-capture? x expression)
+                expression)
+               ((shift-capture?  x expression)
                 expression)
                (else
                 (unwrap expression))))
@@ -102,10 +118,7 @@
                 (let* ((variables  (lambda-variables expression))
                        (expression (lambda-expression expression))
                        (temporaries (map gensym variables))
-                       (expression (fold (lambda (variable temporary expression)
-                                           (substitution variable
-                                                         temporary
-                                                         expression))
+                       (expression (fold substitution
                                          (unwrap expression)
                                          variables
                                          temporaries)))
@@ -117,15 +130,30 @@
                        (expression      (let-expression expression))
                        (temporaries     (map gensym variables))
                        (initializations (map unwrap initializations))
-                       (expression (fold (lambda (variable temporary expression)
-                                           (substitution variable
-                                                         temporary
-                                                         expression))
-                                         expression
+                       (expression (fold substitution
+                                         (unwrap expression)
                                          variables
                                          temporaries))
                        (bindings (map list temporaries initializations)))
                   `(let ,bindings ,expression)))
+
+               ((letrec? expression)
+                (let* ((variables       (letrec-variables expression))
+                       (initializations (letrec-initializations expression))
+                       (expression      (letrec-expression expression))
+                       (temporaries     (map gensym variables))
+                       (initializations (map (lambda (initialization)
+                                               (fold substitution
+                                                     (unwrap initialization)
+                                                     variables
+                                                     temporaries))
+                                             initializations))
+                       (expression (fold substitution
+                                         expression
+                                         variables
+                                         temporaries))
+                       (bindings (map list temporaries initializations)))
+                  `(letrec ,bindings ,expression)))
 
                ((shift? expression)
                 (let* ((variable   (shift-variable   expression))
@@ -138,32 +166,5 @@
                 (unwrap expression))))
        expression))
 
-    (define (anf-conversion expression)
-      (transform
-       (lambda (unwrap expression)
-         (cond ((begin? expression)
-                (let* ((expressions (begin-expressions expression))
-                       (expression  (car expressions))
-                       (expressions (cdr expressions)))
-                  (if (null? expressions)
-                      (unwrap expression)
-                      (let ((temporary (gensym)))
-                        `(let ((,temporary ,(unwrap expression)))
-                           ,(unwrap `(begin . ,expressions)))))))
-               ((if? expression)
-                (let ((condition   (if-condition expression))
-                      (consequent  (if-consequent expression))
-                      (alternative (if-alternative expression))
-                      (temporary (gensym)))
-                  `(let ((temporary ,condition))
-                     (if ,temporary
-                         ,(unwrap consequent)
-                         ,(unwrap alternative)))))
-               ((call? expression)
-                expression)
-               (else
-                (unwrap expression))))
-       expression))
-
     (define (expand expression)
-      (anf-conversion (alpha-conversion expression)))))
+      (alpha-conversion expression))))

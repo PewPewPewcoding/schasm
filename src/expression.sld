@@ -6,6 +6,7 @@
           begin? begin-expressions
           if? if-condition if-consequent if-alternative
           let? let-bindings let-variables let-initializations let-expression
+          letrec? letrec-bindings letrec-variables letrec-initializations letrec-expression
           reset? reset-expression
           shift? shift-variable
           shift-expression call?
@@ -85,6 +86,18 @@
       (map binding-expression (let-bindings value)))
 
     (define let-expression caddr)
+
+    (define letrec? (pattern-match `(letrec ,(list-of binding?) ,expression?)))
+
+    (define letrec-bindings cadr)
+
+    (define (letrec-variables value)
+      (map binding-variable (letrec-bindings value)))
+
+    (define (letrec-initializations value)
+      (map binding-expression (letrec-bindings value)))
+
+    (define letrec-expression caddr)
 
     (define reset? (pattern-match `(reset ,expression?)))
 

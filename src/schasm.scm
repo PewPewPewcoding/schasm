@@ -237,9 +237,6 @@
   (cond ((literal? expression)
          (context-resume context metacontext expression))
 
-        ((quote? expression)
-         (context-resume context metacontext (quote-expression expression)))
-
         ((variable? expression)
          (context-resume context
                          metacontext

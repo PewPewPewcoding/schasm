@@ -18,9 +18,6 @@
         (cond ((literal? expression)
                expression)
 
-              ((quote? expression)
-               expression)
-
               ((variable? expression)
                expression)
 

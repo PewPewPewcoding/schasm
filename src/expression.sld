@@ -1,7 +1,6 @@
 (define-library (schasm expression)
   (export expression?
           literal? boolean? number?
-          quote? quote-expression
           variable?
           lambda? lambda-variables lambda-expression
           begin? begin-expressions
@@ -48,10 +47,6 @@
     (define (literal? value)
       (or (boolean? value)
           (number?  value)))
-
-    (define quote? (pattern-match `(quote ,expression?)))
-
-    (define quote-expression cadr)
 
     (define variable? symbol?)
 

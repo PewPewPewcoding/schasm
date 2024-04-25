@@ -10,6 +10,7 @@
           reset? reset-expression
           shift? shift-variable
           shift-expression call?
+          set!? set!-variable set!-expression
           call-function call-arguments)
   (import (scheme base)
           (scheme cxr)
@@ -40,9 +41,13 @@
       (or (literal?  value)
           (variable? value)
           (lambda?   value)
+          (begin?    value)
           (if?       value)
+          (let?      value)
+          (letrec?   value)
           (reset?    value)
           (shift?    value)
+          (set!?     value)
           (call?     value)))
 
     (define (literal? value)
@@ -108,6 +113,12 @@
     (define shift-variable cadr)
 
     (define shift-expression caddr)
+
+    (define set!? (pattern-match `(set! ,variable? ,expression?)))
+
+    (define set!-variable cadr)
+
+    (define set!-expression caddr)
 
     (define call? (pattern-match `(,expression? . ,(list-of expression?))))
 

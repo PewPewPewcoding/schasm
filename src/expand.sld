@@ -66,6 +66,11 @@
                      (expression (shift-expression expression)))
                  `(shift ,variable ,(transform fn expression))))
 
+              ((set!? expression)
+               (let ((variable   (set!-variable   expression))
+                     (expression (set!-expression expression)))
+                 `(set! ,variable ,(transform fn expression))))
+
               ((call? expression)
                (let ((function  (call-function expression))
                      (arguments (call-arguments expression)))

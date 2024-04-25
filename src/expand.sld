@@ -1,7 +1,6 @@
 (define-library (schasm expand)
   (export expand
-          alpha-conversion
-          anf-conversion)
+          alpha-conversion)
   (import (scheme base)
           (srfi 1)
           (schasm expression))

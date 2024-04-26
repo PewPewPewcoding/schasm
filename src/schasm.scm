@@ -2,7 +2,8 @@
         (scheme write)
         (srfi 1)
         (schasm expression)
-        (schasm expand))
+        (schasm expand)
+        (micro-benchmark))
 
 ;;; environment
 
@@ -14,6 +15,8 @@
     (if (equal? variable* variable) value (environment variable*))))
 
 (define (environment-add* environment variables values)
+  (unless (= (length variables) (length values))
+    (error "environment-add*: not same length" variables values))
   (fold (lambda (variable value environment)
           (environment-add environment variable value))
         environment
@@ -41,7 +44,9 @@
   (store (lambda (_ search) (search address))))
 
 (define (store-update store address value)
-  #f)
+  (store
+   (lambda (address* search)
+     (make-store address* (search-add search address value)))))
 
 (define (store-allocate store value continuation)
   (store (lambda (address search)
@@ -76,20 +81,23 @@
 
 (define (evaluate expression environment store context metacontext)
   (cond ((literal? expression)
-         (context metacontext store
+         (context metacontext
+                  store
                   expression))
 
         ((variable? expression)
-         (context metacontext store
+         (context metacontext
+                  store
                   (store-get store (environment expression))))
 
         ((lambda? expression)
          (let ((variables  (lambda-variables expression))
                (expression (lambda-expression expression)))
-           (context metacontext store
+           (context metacontext
+                    store
                     (lambda (metacontext* context* store* arguments)
                       (store-allocate*
-                       store arguments
+                       store* arguments
                        (lambda (store** addresses)
                          (evaluate expression
                                    (environment-add* environment
@@ -116,17 +124,12 @@
                      environment
                      store
                      (lambda (metacontext* store* value)
-                       (if value
-                           (evaluate consequent
-                                     environment
-                                     store*
-                                     context
-                                     metacontext*)
-                           (evaluate consequent
-                                     environment
-                                     store*
-                                     context
-                                     metacontext*))))))
+                       (evaluate (if value consequent alternative)
+                                 environment
+                                 store*
+                                 context
+                                 metacontext*))
+                     metacontext)))
 
         ((let? expression)
          (let* ((variables       (let-variables       expression))
@@ -141,8 +144,8 @@
                          (lambda (store** addresses)
                            (evaluate expression
                                      (environment-add* environment
-                                                          variables
-                                                          addresses)
+                                                       variables
+                                                       addresses)
                                      store**
                                      context
                                      metacontext*))))
@@ -151,18 +154,20 @@
         ((reset? expression)
          (evaluate (reset-expression expression)
                    environment
+                   store
                    empty-context
                    (lambda (store* value) (context metacontext store* value))))
 
         ((shift? expression)
          (evaluate (shift-expression expression)
                    (environment-add environment
-                                    (shift-variable variable)
+                                    (shift-variable expression)
                                     (lambda (metacontext* context* store* arguments)
                                       (context (lambda (store** value)
                                                  (context metacontext* store** value))
                                                store*
                                                (list-ref arguments 0))))
+                   store
                    empty-context
                    metacontext))
 
@@ -170,8 +175,9 @@
          (let* ((variable   (set!-variable   expression))
                 (expression (set!-expression expression))
                 (address (environment variable)))
-           (evaluate (set!-expression expression)
+           (evaluate expression
                      environment
+                     store
                      (lambda (metacontext* store* value)
                        (context metacontext*
                                 (store-update store* address value)
@@ -183,7 +189,7 @@
                     environment
                     store
                     (lambda (metacontext* store* values)
-                      (let ((function  (list-ref values 0))
+                      (let ((function  (list-ref  values 0))
                             (arguments (list-tail values 1)))
                         (function metacontext* context store* arguments)))
                     metacontext))
@@ -202,7 +208,7 @@
                   (lambda (metacontext* store* value)
                     (evaluate* expressions
                                environment
-                               store
+                               store*
                                (lambda (metacontext** store** values)
                                  (context metacontext** store** (cons value values)))
                                metacontext*))
@@ -210,23 +216,57 @@
 
 ;;; testing
 
-(define program
-  `((lambda (x) x)
-    (reset
-     ((lambda (x y) y)
-      (shift k (lambda (y) y))
-      (lambda (x y) x)))))
+(define (procedure->value f)
+  (lambda (metacontext context store arguments)
+    (context metacontext store (apply f arguments))))
 
-(define program2
-  `(let ((a 12)
-         (b ((lambda (x) x) 42)))
-     a))
+(define (values->environment+store environment store variables values continuation)
+  (store-allocate*
+   store values
+   (lambda (store* addresses)
+     (continuation (environment-add* environment variables addresses)
+                   store*))))
 
-(define result (evaluate program2
-                         empty-environment
-                         empty-store
-                         empty-context
-                         empty-metacontext))
+(define (println . objs)
+  (for-each display objs)
+  (newline))
 
-(display result)
-(newline)
+(define fib-test
+  `(let ((fib #f))
+     (begin
+       (set! fib
+             (lambda (x)
+               (reset
+                (let ((test #f)
+                      (x-1 #f)
+                      (x-2 #f))
+                  (begin
+                    (set! test (< x 2))
+                    (set! x-1 (- x 1))
+                    (set! x-2 (- x 2))
+                    (if test
+                        (shift k x)
+                        (let ((left  #f)
+                              (right #f))
+                          (begin
+                            (set! left  (fib x-1))
+                            (set! right (fib x-2))
+                            (shift k (+ left right))))))))))
+       (fib 5))))
+
+(define-values (env store)
+  (values->environment+store
+   empty-environment empty-store
+   `(< + -)
+   (map procedure->value `(,< ,+ ,-))
+   values))
+
+(define (run)
+  (evaluate fib-test
+            env
+            store
+            empty-context
+            empty-metacontext))
+
+(for-each println (benchmark-run (run)))
+(println (run))

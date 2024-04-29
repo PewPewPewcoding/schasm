@@ -96,6 +96,8 @@
            (context metacontext
                     store
                     (lambda (metacontext* context* store* arguments)
+                      (unless (= (length variables) (length arguments))
+                        (error "Arity error" variables arguments))
                       (store-allocate*
                        store* arguments
                        (lambda (store** addresses)
@@ -156,13 +158,16 @@
                    environment
                    store
                    empty-context
-                   (lambda (store* value) (context metacontext store* value))))
+                   (lambda (store* value)
+                     (context metacontext store* value))))
 
         ((shift? expression)
          (evaluate (shift-expression expression)
                    (environment-add environment
                                     (shift-variable expression)
                                     (lambda (metacontext* context* store* arguments)
+                                      (unless (= 1 (length arguments))
+                                        (error "Arity error" 1 arguments))
                                       (context (lambda (store** value)
                                                  (context* metacontext* store** value))
                                                store*

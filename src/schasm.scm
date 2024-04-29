@@ -164,7 +164,7 @@
                                     (shift-variable expression)
                                     (lambda (metacontext* context* store* arguments)
                                       (context (lambda (store** value)
-                                                 (context metacontext* store** value))
+                                                 (context* metacontext* store** value))
                                                store*
                                                (list-ref arguments 0))))
                    store
@@ -268,5 +268,5 @@
             empty-context
             empty-metacontext))
 
-(for-each println (benchmark-run (run)))
 (println (run))
+(for-each println (benchmark-run (run)))

@@ -29,6 +29,7 @@
       (variable? value)
       (lambda?   value)
 
+      (ref??     value)
       (ref?      value)
       (unref?    value)
       (set-ref!? value)
@@ -49,6 +50,9 @@
 (define lambda? (pattern-match `(lambda ,(list-of variable?) ,expression?)))
 (define lambda-variables cadr)
 (define lambda-expression caddr)
+
+(define ref?? (pattern-match `(ref? ,expression?)))
+(define ref?-expression cadr)
 
 (define ref? (pattern-match `(ref ,expression?)))
 (define ref-expression cadr)
@@ -100,31 +104,21 @@
 
 ;;; store
 
-(define-record-type <store>
-  (make-store location content)
-  store?
-  (location store-location)
-  (content store-content))
-
-(define empty-store (make-store 0 '()))
+(define empty-store '())
 
 (define (store-lookup store location)
-  (let* ((entry (assoc location (store-content store))))
+  (let* ((entry (assoc location store)))
     (unless entry
       (error "store-lookup: unallocated memory" location store))
-    (cdr entry)))
+    ((cdr entry))))
 
-(define (store-allocate store value continuation)
-  (let* ((location (store-location store))
-         (content  (store-content  store))
-         (store (make-store (+ 1 location)
-                           (cons (cons location value) content))))
-    (continuation store location)))
+(define (store-allocate store continuation)
+  (let ((location (gensym))
+        (value (lambda () (error "store-allocate: uninitialized memory"))))
+    (continuation (cons (cons location value) store) location)))
 
 (define (store-update store location value)
-  (make-store (store-location store)
-              (cons (cons location value)
-                    (store-content store))))
+  (cons (cons location (lambda () value)) store))
 
 ;;; metacontext
 
@@ -147,9 +141,6 @@
 
 
 ;;; values
-
-(define (make-immediate expression)
-  expression)
 
 (define (make-closure environment variables expression)
   (lambda (metacontext context store arguments)
@@ -184,7 +175,7 @@
          (context-resume context
                          metacontext
                          store
-                         (make-immediate expression)))
+                         expression))
 
         ((variable? expression)
          (context-resume context
@@ -215,6 +206,18 @@
                                  metacontext))
                      metacontext)))
 
+        ((ref?? expression)
+         (let ((expression (ref?-expression expression)))
+           (evaluate expression
+                     environment
+                     store
+                     (lambda (metacontext store value)
+                       (context-resume context
+                                       metacontext
+                                       store
+                                       (reference? value)))
+                     metacontext)))
+
         ((ref? expression)
          (let ((expression (ref-expression expression)))
            (evaluate expression
@@ -222,11 +225,11 @@
                      store
                      (lambda (metacontext store value)
                        (store-allocate
-                        store value
+                        store
                         (lambda (store location)
                           (context-resume context
                                           metacontext
-                                          store
+                                          (store-update store location value)
                                           (make-reference location)))))
                      metacontext)))
 
@@ -270,22 +273,19 @@
 
         ((shift? expression)
          (let* ((variable   (shift-variable   expression))
-                (expression (shift-expression expression))
-                (continuation (make-continuation context))
-                (environment (environment-add environment
-                                              variable
-                                              continuation)))
+                (expression (shift-expression expression)))
            (evaluate expression
-                     environment
+                     (environment-add environment
+                                      variable
+                                      (make-continuation context))
                      store
                      empty-context
                      metacontext)))
 
         ((call?  expression)
          (let* ((function  (call-function  expression))
-                (arguments (call-arguments expression))
-                (expressions (cons function arguments)))
-           (evaluate* expressions
+                (arguments (call-arguments expression)))
+           (evaluate* (cons function arguments)
                       environment
                       store
                       (lambda (metacontext store values)
